@@ -7099,6 +7099,8 @@ inline bool ClientImpl::write_request(Stream &strm, Request &req,
   }
 
   // Request line and headers
+  std::string one_flush_buffer; // Writing to this buffer and then write to
+                                // the stream in one go to prevent fragmentation
   {
     detail::BufferStream bstrm;
 
@@ -7107,20 +7109,21 @@ inline bool ClientImpl::write_request(Stream &strm, Request &req,
 
     detail::write_headers(bstrm, req.headers);
 
-    // Flush buffer
-    auto &data = bstrm.get_buffer();
-    if (!detail::write_data(strm, data.data(), data.size())) {
-      error = Error::Write;
-      return false;
-    }
+    // Queue buffer for transmission
+    one_flush_buffer = bstrm.get_buffer();
   }
 
   // Body
   if (req.body.empty()) {
+    if (!detail::write_data(strm, one_flush_buffer.data(), one_flush_buffer.size())) {
+      error = Error::Write;
+      return false;
+    }
     return write_content_with_provider(strm, req, error);
   }
 
-  if (!detail::write_data(strm, req.body.data(), req.body.size())) {
+  one_flush_buffer += req.body.data();
+  if (!detail::write_data(strm, one_flush_buffer.data(), one_flush_buffer.size())) {
     error = Error::Write;
     return false;
   }
